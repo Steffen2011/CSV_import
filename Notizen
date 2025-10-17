@@ -1,0 +1,58 @@
+    #
+        # # Probenname aus der ersten Zeile extrahieren
+        # with open(self.file_path, 'r', encoding='utf-8') as f:
+        #     for line in f:
+        #         if "Proben-Name:" in line:
+        #             self.name = line.split(":")[1].strip()  # Extrahiere den Namen nach dem Doppelpunkt
+        #             break
+        #
+        # # Zerlege den Probenamen (self.name) in einzelne Teile durch Leerzeichen
+        # name_parts = self.name.split()
+        #
+        # # Liste von Suchparametern: (Attributname, Regex-Muster)
+        #
+        # search_patterns = [
+        #     ("leg", r"#\d+"),  # Probenummer: Z.B. "#04"
+        #     ("temp", r"\d+°C"),  # Temperatur: Z.B. "812°C"
+        #     ("time", r"\d+h")  # Dauer: Z.B. "10h"
+        # ]
+
+        # # Suche in den Teilen der Zeichenkette
+        # for part in name_parts:
+        #     for attribute, pattern in search_patterns:
+        #         # Überspringen, wenn das Attribut bereits zugewiesen wurde
+        #         if getattr(self, attribute) is not None:
+        #             continue
+        #         # Anwenden des regulären Ausdrucks
+        #         match = re.search(pattern, part)
+        #         if match:
+        #             setattr(self, attribute, match.group(0).strip())  # Setze das Attribut dynamisch
+        #             break  # Springe zur nächsten "part"
+        #
+        # # Wenn keine Zeitangabe gefunden wurde, nim die Zeichenkette zwischen dem ersten und zweiten Leerzeichen
+        # if not self.time:
+        #     words = self.name.split()
+        #     if len(words) >= 2:
+        #         self.time = words[1]  # Zeichenkette nach dem ersten Leerzeichen
+        #
+        #     if len(words) >= 2:
+        #         self.time = f"{words[1]}"  # Nimm das Wort zwischen dem ersten und zweiten Leerzeichen
+        #
+        # print(f"erste Wort:{self.leg} / zweite Wort:{self.temp} / dritte Wort:{self.time}")
+        #
+        # column_names = ["number", "hardness", "measurement", "x-diagonal", "y-diagonal", "x-pos", "y-pos"]
+        # df = pd.read_csv(self.file_path, skiprows=1, sep=";", names=column_names)
+        #
+        # df["hardness"] = pd.to_numeric(df["hardness"], errors='coerce')
+        # self.mean = df["hardness"].mean()
+        #
+        # df["hardness"] = pd.to_numeric(df["hardness"], errors='coerce')
+        # self.std = df["hardness"].std()
+        #
+        # # Sicherstellen, dass der 'measurement'-Key verfügbar ist
+        # if "measurement" in df.columns:
+        #     self.measurement = df["measurement"].iloc[0]  # Erstes Element oder gewünschten Wert laden
+        # else:
+        #     raise KeyError("Column 'measurement' not found in the file.")
+        # print(f"mean: {self.mean} / std: {self.std}")
+        #
