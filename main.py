@@ -1,3 +1,4 @@
+import csv
 import os
 import re
 import pandas as pd
@@ -98,46 +99,76 @@ class CSVFile:
                 # Normalisiere Klassennamen (z.B. "4.c" zu "4c")
                 text = re.sub(r'(\d+)\.([a-zA-Z])', r'\1\2', text)
 
-                # Erst nach Großbuchstaben trennen
-                initial_tokens = []
-                for part in text.split():
-                    # Überspringe Klassenkürzel (z.B. "4c")
-                    if re.match(r'^\d+[a-zA-Z]$', part):
-                        initial_tokens.append(part)
-                    # Wenn alle Buchstaben groß sind, nicht trennen
-                    elif part.isupper():
-                        initial_tokens.append(part)
+                # Erst nach Klassenkürzel suchen
+                tokens = []
+                parts = text.split()
+                for part in parts:
+                    # Wenn alle Buchstaben groß sind, als eigenes Token behalten
+                    if part.isalpha() and part.isupper():
+                        tokens.append(part)
+                        continue
+            
+                    # Finde Klassenkürzel (z.B. "4c")
+                    class_match = re.match(r'^(\d+[a-zA-Z])(.*)', part)
+                    if class_match:
+                        class_token, remaining = class_match.groups()
+                        tokens.append(class_token)
+                        if remaining:
+                            # Verarbeite den Rest des Strings
+                            current_word = ''
+                            for char in remaining:
+                                if char.isupper() and current_word:
+                                    tokens.append(current_word)
+                                    current_word = char
+                                else:
+                                    current_word += char
+                            if current_word:
+                                tokens.append(current_word)
                     else:
-                        # Trenne an Großbuchstaben
-                        split_parts = re.findall('[A-Z][^A-Z]*', part)
-                        if split_parts:
-                            initial_tokens.extend(split_parts)
-                        else:
-                            initial_tokens.append(part)
+                        # Wenn kein Klassenkürzel gefunden wurde
+                        current_word = ''
+                        for char in part:
+                            if char.isupper() and current_word:
+                                tokens.append(current_word)
+                                current_word = char
+                            else:
+                                current_word += char
+                        if current_word:
+                            tokens.append(current_word)
 
                 # Dann nach Separatoren trennen
                 separators = ['.', ' ', ':', ',', ';', '_', '-', '(', ')']
-                tokens = initial_tokens
-
-                # Iterativ durch alle Separatoren gehen
-                for sep in separators:
-                    new_tokens = []
-                    for token in tokens:
-                        new_tokens.extend(t.strip() for t in token.split(sep))
-                    tokens = new_tokens
-
-                # Bereinigung: Leere Strings und Zahlen entfernen, alles zu Kleinbuchstaben
-                cleaned_tokens = []
+                final_tokens = []
                 for token in tokens:
-                    token = token.lower().strip()
-                    # Prüfen ob Token nicht leer ist und nicht nur aus Zahlen besteht
-                    if (token and not token.replace('.', '').isdigit() and token != 'spendenlauf'):
-                        cleaned_tokens.append(token)
+                    # Wenn Token komplett in Großbuchstaben ist, nicht weiter trennen
+                    if token.isalpha() and token.isupper():
+                        final_tokens.append(token)
+                        continue
+            
+                    for sep in separators:
+                        token = ' '.join(t.strip() for t in token.split(sep))
+                    final_tokens.extend(token.split())
+
+                # Bereinigung: Leere Strings und Zahlen entfernen
+                # Großbuchstaben-Tokens bleiben erhalten, Rest wird kleingeschrieben
+                cleaned_tokens = []
+                for token in final_tokens:
+                    token = token.strip()
+                    # Wenn Token komplett in Großbuchstaben ist, beibehalten
+                    if token.isalpha() and token.isupper():
+                        if token and not token.replace('.', '').isdigit() and token != 'SPENDENLAUF':
+                            cleaned_tokens.append(token)
+                    else:
+                        # Ansonsten zu Kleinbuchstaben konvertieren
+                        token = token.lower()
+                        if token and not token.replace('.', '').isdigit() and token != 'spendenlauf':
+                            cleaned_tokens.append(token)
 
                 return list(set(cleaned_tokens))  # Duplikate entfernen
 
             # Neue Spalte für die Token-Listen erstellen
             self.df['verwendungszweck_tokens'] = self.df['Verwendungszweck'].apply(tokenize_text)
+            self.df['beguenstigter_tokens'] = self.df['Beguenstigter/Zahlungspflichtiger'].apply(tokenize_text)
 
             # Beispielausgabe der ersten Einträge
 
@@ -150,9 +181,83 @@ class CSVFile:
             print("Keine Daten geladen.")
             return False
 
+    def save_to_sql_format(self, output_path=None):
+        """
+        Speichert die verarbeiteten Daten in einem SQL-freundlichen CSV-Format.
+        
+        Args:
+            output_path (str, optional): Zielverzeichnis für die Ausgabedatei.
+                                       Wenn None, wird das Verzeichnis der Eingabedatei verwendet.
+        
+        Returns:
+            str: Pfad zur erstellten Datei oder None bei Fehler
+        """
+        if self.df is None:
+            print("Keine Daten zum Speichern vorhanden.")
+            return None
+            
+        try:
+            # Erstelle einen neuen DataFrame für die SQL-freundliche Ausgabe
+            sql_ready_data = []
+            
+            # Verarbeite jede Zeile
+            for idx, row in self.df.iterrows():
+                betrag = row['Betrag']
+                original_verwendungszweck = row['Verwendungszweck']
+                tokens = row['verwendungszweck_tokens']
+                beguenstigter = row['Beguenstigter/Zahlungspflichtiger']
+                
+                # Extrahiere Klasse (wenn vorhanden)
+                klasse = next((token for token in tokens if re.match(r'^\d+[a-zA-Z]$', token)), None)
+                
+                # Erstelle einen Datensatz pro Zeile
+                sql_ready_data.append({
+                    'ID': idx + 1,
+                    'Klasse': klasse if klasse else '',
+                    'Original_Verwendungszweck': original_verwendungszweck,
+                    'Tokens': ', '.join(sorted(tokens)),
+                    'Beguenstigter': beguenstigter,
+                    'Betrag': betrag
+                })
+            
+            # Erstelle neuen DataFrame
+            sql_df = pd.DataFrame(sql_ready_data)
+            
+            # Bestimme den Ausgabepfad
+            if output_path is None:
+                base_path = os.path.splitext(self.file_path)[0]
+            else:
+                base_name = os.path.basename(os.path.splitext(self.file_path)[0])
+                base_path = os.path.join(output_path, base_name)
+                
+            sql_ready_path = f"{base_path}_SQL_Ready.csv"
+            index = 1
+            while os.path.exists(sql_ready_path):
+                sql_ready_path = f"{base_path}_SQL_Ready_{index}.csv"
+                index += 1
+            
+            # Speichere mit angepassten Einstellungen
+            sql_df.to_csv(sql_ready_path, 
+                         index=False,
+                         sep=';',
+                         encoding='utf-8',
+                         quoting=csv.QUOTE_ALL)
+            
+            print(f"\nSQL-freundliche Datei wurde erstellt: {sql_ready_path}")
+            print("\nErste Zeilen der neuen Datei:")
+            print(sql_df.head())
+            return sql_ready_path
+            
+        except Exception as e:
+            print(f"Fehler beim Speichern der SQL-freundlichen Datei: {e}")
+            return None
+
     def sortierung(self):
-        if self.df is not None:
-            self.df.to_csv(get_unique_file_name(self), index=False)
+        """
+        Veraltete Methode - bitte save_to_sql_format() verwenden
+        """
+        print("Warnung: Diese Methode ist veraltet. Bitte verwenden Sie save_to_sql_format().")
+        return self.save_to_sql_format()
 
 
 
@@ -197,6 +302,9 @@ class CSVAnalyser:
             csv_file_obj.process_verwendungszweck()
             csv_file_obj.show_columns()
             csv_file_obj.inhalt()
+            sql_file_path = csv_file_obj.save_to_sql_format(self.pfad)
+            if sql_file_path:
+                print(f"SQL-Datei erfolgreich gespeichert unter: {sql_file_path}")
             self.files.append(csv_file_obj)
 
 
