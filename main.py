@@ -83,67 +83,55 @@ class CSVFile:
             return list(set(tokens))
 
         # Normalisiere verschiedene Klassenschreibweisen
-        text_normalized = text.lower()  # Temporäre Kopie für Klassenerkennung
+        text = text.lower()  # Temporäre Kopie für Klassenerkennung
         
         # Liste für gefundene Klassenbezeichnungen
         class_tokens = []
         
         # Verschiedene Muster für Klassenbezeichnungen
         patterns = [
-            # 3.a - einfaches Format mit Punkt
-            r'(\d+)\.([a-zA-Z])\b',
-            # Kl.1a, Klasse 1 a, Klasse.1a
-            r'(?:kl\.?|klasse\.?\s*)(\d+)\s*[^a-zA-Z0-9]*\s*([a-zA-Z])',
-            # (1 A), SPENDENLAUF(1 A)
-            r'(?:spendenlauf)?\s*\(?(\d+)\s*([a-zA-Z])\)?',
-            # Klasse6d, direkte Verbindung
-            r'(?:klasse\.?)(\d+)([a-zA-z])',
-            # Klasse.2dVornamen - Klasse mit nachfolgendem Text
-            r'(?:klasse\.?)(\d+)([a-zA-z])(?=[A-Z]|$)',
+            # r'(\d)(?![\d,.])[\s.-]*([a-e])(?!\w)',  # Matcht nur Ziffern die nicht Teil einer größeren Zahl sind
+            # Matcht nur Ziffern zwische 1 und 6 die nicht Teil einer größeren Zahl sind
+            # und nachfolgenden Buchstaben zwischen a und e
+            r'([1-6])(?![\d,])\W*([a-e])',
         ]
-        
+
         # Suche nach allen Klassenbezeichnungen
         for pattern in patterns:
-            matches = re.finditer(pattern, text_normalized)
+            matches = re.finditer(pattern, text)
             for match in matches:
                 class_number, class_letter = match.groups()
                 class_token = f"{class_number}{class_letter}"
                 class_tokens.append(class_token)
                 # Entferne den gefundenen Text für die weitere Verarbeitung
                 text = text.replace(match.group(0), ' ')
-        
+
+        # Liste von regex Patterns die entfernt werden sollen
+        remove_patterns = {
+            r'spendenlauf[^a-z]*',     # Matcht spendenlauf, spendenlauf:, spendenlauf(, etc.
+            r'kl(?:asse)?[^a-z]*',     # Matcht kl, klasse, klasse:, etc.
+            r'schul[^a-z]*',           # Matcht schule, schule:, etc.
+            r'.*grundschule[^a-z]*'    # Matcht grundschule, grundschule:, etc.
+        }
+
+        # Entferne Sonderzeichen und mehrfache Leerzeichen
+        text = re.sub(r'[(),/\\]', ' ', text)  # Ersetze Sonderzeichen durch Leerzeichen
+        text = re.sub(r'\s+', ' ', text)  # Ersetze mehrfache Leerzeichen durch eines
+        text = text.strip()  # Entferne Leerzeichen am Anfang und Ende
+
         # Verarbeite den restlichen Text
         tokens = []
         parts = text.split()
         for part in parts:
-            # Wenn alle Buchstaben groß sind und nicht 'SPENDENLAUF', als eigenes Token behalten
-            if part.isalpha() and part.isupper() and part != 'SPENDENLAUF':
-                tokens.append(part.lower())
-                continue
-
-            # Normales Wort-Processing
-            current_word = ''
-            for char in part:
-                if char.isupper() and current_word:
-                    if current_word.lower() != 'spendenlauf':
-                        tokens.append(current_word.lower())
-                    current_word = char
-                else:
-                    current_word += char
-            if current_word and current_word.lower() != 'spendenlauf':
-                tokens.append(current_word.lower())
+            # Prüfe ob das Wort mit keinem der Patterns übereinstimmt
+            if part and not part.replace('.', '').isdigit():
+                if not any(re.match(pattern, part) for pattern in remove_patterns):
+                    tokens.append(part)
 
         # Füge Klassentokens hinzu
         tokens.extend(class_tokens)
 
-        # Bereinige die Token-Liste
-        cleaned_tokens = []
-        for token in tokens:
-            token = token.strip().lower()
-            if token and not token.replace('.', '').isdigit() and token != 'spendenlauf':
-                cleaned_tokens.append(token)
-
-        return list(set(cleaned_tokens))  # Entferne Duplikate
+        return list(set(tokens))  # Entferne Duplikate
 
     def load_and_analyse(self):
         try:
@@ -211,16 +199,13 @@ class CSVFile:
                 beguenstigter = row['Beguenstigter/Zahlungspflichtiger']
                 beguenstigter_token = row['beguenstigter_tokens']
 
-                # Extrahiere Klasse (wenn vorhanden)
-                klasse = next((token for token in verwendungszweck_tokens if re.match(r'^\d+[a-zA-Z]$', token)), None)
-
                 # Erstelle einen Datensatz pro Zeile
                 sql_ready_data.append({
                     'ID': idx + 1,
-                    'Original_Verwendungszweck': verwendungszweck,
-                    'Klasse': klasse if klasse else '',
+                    # 'Original_Verwendungszweck': verwendungszweck,
+                    'Klasse': next(iter([t for t in verwendungszweck_tokens if len(t) == 2 and t[0] in '123456' and t[1] in 'abcde']), ''),
                     'verwendungszweck_tokens': verwendungszweck_tokens,  #', '.join(sorted(verwendungszweck_tokens)),
-                    'Beguenstigter': beguenstigter,
+                    # 'Beguenstigter': beguenstigter,
                     'beguenstigter_token': beguenstigter_token,
                     'Betrag': betrag
                 })
@@ -294,7 +279,7 @@ class CSVAnalyser:
 
             # Duplikate entfernen basierend auf relevanten Spalten
             merged_df = merged_df.drop_duplicates(
-                subset=['Original_Verwendungszweck'],
+                subset=['verwendungszweck_tokens'],
                 keep='first'
             )
 
